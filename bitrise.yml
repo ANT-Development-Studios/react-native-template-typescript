@@ -1,0 +1,186 @@
+---
+format_version: '8'
+default_step_lib_source: https://github.com/bitrise-io/bitrise-steplib.git
+project_type: react-native
+trigger_map:
+- push_branch: release/*
+  workflow: deploy-staging
+- push_branch: develop
+  workflow: deploy-staging
+- push_branch: master
+  workflow: deploy-production
+- pull_request_source_branch: feature/*
+  pull_request_target_branch: develop
+  workflow: deploy-staging
+workflows:
+  deploy-staging:
+    steps:
+    - activate-ssh-key@4.0.5:
+        run_if: '{{getenv "SSH_RSA_PRIVATE_KEY" | ne ""}}'
+    - git-clone@4.0.18: {}
+    - script@1.1.6:
+        title: Set environment config (STAGING)
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            # fail if any commands fails
+            set -e
+            # debug log
+            set -x
+
+            # specify local download path
+            file_local_path=$BITRISE_SOURCE_DIR/src/firebase.config.js
+
+            # download the file
+            wget -O "$file_local_path" "$BITRISEIO_STAGING_FIREBASE_CONFIG_URL"
+            echo "file downloaded to: $file_local_path"
+    - yarn@0.1.1:
+        inputs:
+        - command: install
+        title: Install dependencies
+    - yarn@0.1.1:
+        title: Lint
+        inputs:
+        - command: lint
+    - yarn@0.1.1:
+        inputs:
+        - command: test
+        title: Run unit tests
+    - install-missing-android-tools@2.3.8:
+        inputs:
+        - gradlew_path: "$PROJECT_LOCATION/gradlew"
+    - android-build@0.10:
+        inputs:
+        - project_location: "$PROJECT_LOCATION"
+        - module: "$MODULE"
+        - variant: "$BUILD_VARIANT"
+    - sign-apk@1.4: {}
+    - ios-auto-provision-appstoreconnect@0.1:
+        inputs:
+        - distribution_type: ad-hoc
+    - xcode-archive@2.8:
+        inputs:
+        - project_path: "$BITRISE_PROJECT_PATH"
+        - scheme: "$BITRISE_SCHEME"
+        - export_method: "$BITRISE_EXPORT_METHOD"
+        - configuration: Release
+    - deploy-to-bitrise-io@1.10: {}
+    - create-install-page-qr-code@1.0.0: {}
+    - slack@3.1:
+        inputs:
+        - channel: "#bitrise"
+        - text: ''
+        - image_url: "$BITRISE_PUBLIC_INSTALL_PAGE_QR_CODE_IMAGE_URL"
+        - thumb_url: ''
+        - fields: |
+            App|${BITRISE_APP_TITLE}
+            Branch|${BITRISE_GIT_BRANCH}
+            Workflow|${BITRISE_TRIGGERED_WORKFLOW_ID}
+            Build number|${BITRISE_BUILD_NUMBER}
+            Commit hash|${BITRISE_GIT_COMMIT}
+        - webhook_url: "$SLACK_WEBHOOK_URL"
+  deploy-production:
+    steps:
+    - activate-ssh-key@4.0.5:
+        run_if: '{{getenv "SSH_RSA_PRIVATE_KEY" | ne ""}}'
+    - git-clone@4.0.18: {}
+    - script@1.1.6:
+        title: Set environment config (PRODUCTION)
+        inputs:
+        - content: |-
+            #!/usr/bin/env bash
+            # fail if any commands fails
+            set -e
+            # debug log
+            set -x
+
+            # specify local download path
+            file_local_path=$BITRISE_SOURCE_DIR/src/firebase.config.js
+
+            # download the file
+            wget -O "$file_local_path" "$BITRISEIO_PRODUCTION_FIREBASE_CONFIG_URL"
+            echo "file downloaded to: $file_local_path"
+    - yarn@0.1.1:
+        inputs:
+        - command: install
+        title: Install dependencies
+    - yarn@0.1.1:
+        title: Lint
+        inputs:
+        - command: lint
+    - yarn@0.1.1:
+        inputs:
+        - command: test
+        title: Run unit tests
+    - install-missing-android-tools@2.3.8:
+        inputs:
+        - gradlew_path: "$PROJECT_LOCATION/gradlew"
+    - change-android-versioncode-and-versionname@1:
+        inputs:
+        - build_gradle_path: "$BITRISE_SOURCE_DIR/android/app/build.gradle"
+    - android-build@0.10:
+        inputs:
+        - project_location: "$PROJECT_LOCATION"
+        - module: "$MODULE"
+        - variant: "$BUILD_VARIANT"
+    - sign-apk@1.4: {}
+    - ios-auto-provision-appstoreconnect@0.1:
+        inputs:
+        - distribution_type: ad-hoc
+    - set-xcode-build-number@1:
+        inputs:
+        - build_short_version_string: ''
+        - plist_path: "$BITRISE_SOURCE_DIR/ios/{PROJECT-NAME}/Info.plist"
+    - xcode-archive@2.8:
+        inputs:
+        - project_path: "$BITRISE_PROJECT_PATH"
+        - scheme: "$BITRISE_SCHEME"
+        - export_method: "$BITRISE_EXPORT_METHOD"
+        - configuration: Release
+    - deploy-to-bitrise-io@1.10: {}
+    - create-install-page-qr-code@1.0.0: {}
+    - slack@3.1:
+        inputs:
+        - channel: "#bitrise"
+        - text: ''
+        - image_url: "$BITRISE_PUBLIC_INSTALL_PAGE_QR_CODE_IMAGE_URL"
+        - thumb_url: ''
+        - fields: |
+            App|${BITRISE_APP_TITLE}
+            Branch|${BITRISE_GIT_BRANCH}
+            Workflow|${BITRISE_TRIGGERED_WORKFLOW_ID}
+            Build number|${BITRISE_BUILD_NUMBER}
+            Commit hash|${BITRISE_GIT_COMMIT}
+        - webhook_url: "$SLACK_WEBHOOK_URL"
+    - deploy-to-itunesconnect-application-loader@0:
+        inputs:
+        - password: "$APPLE_ID_PASSWORD"
+        - app_password: "$APPLE_ID_APP_PASSWORD"
+        - itunescon_user: "$APPLE_ID"
+    - google-play-deploy@3.0:
+        inputs:
+        - package_name: {PACKAGE-NAME}
+        - track: production
+        - service_account_json_key_path: "$BITRISEIO_SERVICE_ACCOUNT_JSON_KEY_URL"
+        asset_urls:
+          icon.svg: https://bitrise-steplib-collection.s3.amazonaws.com/steps/google-play-deploy/assets/icon.svg
+app:
+  envs:
+  - opts:
+      is_expand: false
+    PROJECT_LOCATION: android
+  - opts:
+      is_expand: false
+    MODULE: app
+  - opts:
+      is_expand: false
+    VARIANT: ''
+  - opts:
+      is_expand: false
+    BITRISE_PROJECT_PATH: ios/{PROJECT-NAME}.xcodeproj
+  - opts:
+      is_expand: false
+    BITRISE_SCHEME: {PROJECT-NAME}
+  - opts:
+      is_expand: false
+    BITRISE_EXPORT_METHOD: app-store
